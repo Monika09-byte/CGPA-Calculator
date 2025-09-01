@@ -1,0 +1,253 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>CGPA Calculator</title>
+  <style>
+    :root{
+      --bg:#0f1724;
+      --card:#0b1220;
+      --muted:#9aa4b2;
+      --accent:#7dd3fc;
+      --glass: rgba(255,255,255,0.03);
+      --radius:12px;
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial;
+    }
+    *{box-sizing:border-box}
+    html,body{height:100%}
+    body{
+      margin:0;
+      background:linear-gradient(180deg,#071226 0%, #07172b 100%);
+      color:#e6eef6;
+      display:flex;
+      align-items:center;
+      justify-content:center;
+      padding:24px;
+    }
+    .container{
+      width:100%;
+      max-width:880px;
+      background:linear-gradient(180deg, rgba(255,255,255,0.02), rgba(255,255,255,0.01));
+      padding:20px;
+      border-radius:var(--radius);
+      box-shadow: 0 6px 30px rgba(2,6,23,0.6);
+    }
+    h1{margin:0 0 12px;font-size:1.5rem}
+    .controls{display:flex;gap:8px;margin-bottom:12px}
+    button{
+      background:var(--glass);
+      color:var(--accent);
+      border:1px solid rgba(125,211,252,0.08);
+      padding:8px 12px;
+      border-radius:8px;
+      cursor:pointer;
+    }
+    button:hover{filter:brightness(1.05)}
+    #semTable{width:100%;border-collapse:collapse;margin-bottom:12px}
+    #semTable th,#semTable td{
+      padding:8px 10px;text-align:left;font-size:0.95rem;
+      border-bottom:1px solid rgba(255,255,255,0.03)
+    }
+    input[type="number"]{
+      width:100%;padding:6px;border-radius:8px;border:1px solid rgba(255,255,255,0.03);
+      background:transparent;color:inherit;
+    }
+    .actions{display:flex;gap:8px;margin-bottom:12px}
+    #error{color:#ffb4b4;margin-top:6px}
+    #result{
+      font-weight:600;padding:10px;border-radius:8px;background:rgba(125,211,252,0.04);color:var(--accent);
+      display:inline-block;
+      margin-top:6px;
+    }
+    .removeBtn{background:transparent;color:#fda4af;border:0;cursor:pointer}
+    @media (max-width:600px){
+      .controls, .actions{flex-direction:column;align-items:stretch}
+      #semTable th,#semTable td{font-size:0.9rem}
+    }
+  </style>
+</head>
+<body>
+  <main class="container">
+    <h1>CGPA Calculator</h1>
+    <section class="controls">
+      <button id="addRowBtn">+ Add Semester</button>
+      <button id="clearBtn">Clear All</button>
+    </section>
+    <form id="semForm" autocomplete="off">
+      <table id="semTable" aria-label="Semester table">
+        <thead>
+          <tr>
+            <th>Semester</th>
+            <th>SGPA (0-10)</th>
+            <th>Credits</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody id="semTbody"></tbody>
+      </table>
+      <div class="actions">
+        <button type="button" id="calcBtn">Calculate CGPA</button>
+        <button type="button" id="saveBtn">Save</button>
+        <button type="button" id="exportBtn">Export CSV</button>
+      </div>
+      <div id="result" aria-live="polite"></div>
+      <div id="error" class="error" aria-live="assertive"></div>
+    </form>
+    <footer>
+      <small>Built with HTML • CSS • JavaScript</small>
+    </footer>
+  </main>
+  <script>
+    const semTbody = document.getElementById('semTbody');
+    const addRowBtn = document.getElementById('addRowBtn');
+    const calcBtn = document.getElementById('calcBtn');
+    const saveBtn = document.getElementById('saveBtn');
+    const exportBtn = document.getElementById('exportBtn');
+    const resultDiv = document.getElementById('result');
+    const errorDiv = document.getElementById('error');
+    const clearBtn = document.getElementById('clearBtn');
+    let semCount = 0;
+
+    function createRow(sgpa = '', credits = '') {
+      semCount++;
+      const tr = document.createElement('tr');
+      tr.dataset.row = semCount;
+      tr.innerHTML = `
+        <td>Semester ${semCount}</td>
+        <td><input type="number" step="0.01" min="0" max="10" class="sgpa" value="${sgpa}"></td>
+        <td><input type="number" step="1" min="0" class="credits" value="${credits}"></td>
+        <td><button type="button" class="removeBtn">Remove</button></td>
+      `;
+      tr.querySelector('.removeBtn').addEventListener('click', () => {
+        tr.remove();
+        updateSemesterNumbers();
+      });
+      semTbody.appendChild(tr);
+    }
+
+    function updateSemesterNumbers(){
+      const rows = semTbody.querySelectorAll('tr');
+      rows.forEach((r,i)=> r.querySelector('td').textContent = `Semester ${i+1}`);
+      semCount = rows.length;
+    }
+
+    addRowBtn.addEventListener('click', () => createRow());
+    clearBtn.addEventListener('click', () => {
+      semTbody.innerHTML = '';
+      resultDiv.textContent = '';
+      errorDiv.textContent = '';
+      semCount = 0;
+    });
+
+    calcBtn.addEventListener('click', calculateCGPA);
+    saveBtn.addEventListener('click', saveToLocal);
+    exportBtn.addEventListener('click', exportCSV);
+
+    if(semTbody.children.length === 0){
+      createRow();
+      createRow();
+    }
+
+    function calculateCGPA(){
+      errorDiv.textContent = '';
+      resultDiv.textContent = '';
+      const rows = [...semTbody.querySelectorAll('tr')];
+      if(rows.length === 0){
+        errorDiv.textContent = 'Add at least one semester.';
+        return;
+      }
+      let weightedSum = 0;
+      let creditSum = 0;
+      let anyCreditEntered = false;
+      const details = [];
+
+      for(const r of rows){
+        const sgpaIn = r.querySelector('.sgpa').value.trim();
+        const creditsIn = r.querySelector('.credits').value.trim();
+        if(sgpaIn === ''){
+          errorDiv.textContent = 'Please fill all SGPA fields.';
+          return;
+        }
+        const sgpa = parseFloat(sgpaIn);
+        if(Number.isNaN(sgpa) || sgpa < 0 || sgpa > 10){
+          errorDiv.textContent = 'SGPA must be between 0 and 10.';
+          return;
+        }
+        let credits = null;
+        if(creditsIn !== ''){
+          anyCreditEntered = true;
+          credits = parseFloat(creditsIn);
+          if(Number.isNaN(credits) || credits <= 0){
+            errorDiv.textContent = 'Credits must be a positive number.';
+            return;
+          }
+        }
+        details.push({sgpa, credits});
+      }
+
+      if(!anyCreditEntered){
+        details.forEach(d => { weightedSum += d.sgpa; creditSum += 1; });
+      } else {
+        details.forEach(d => {
+          const c = (d.credits === null) ? 0 : d.credits;
+          weightedSum += d.sgpa * c;
+          creditSum += c;
+        });
+        if(creditSum === 0){
+          details.forEach(d => { weightedSum += d.sgpa; creditSum += 1; });
+        }
+      }
+      const cgpa = weightedSum / creditSum;
+      resultDiv.textContent = `CGPA: ${cgpa.toFixed(2)} (based on ${creditSum} total credits)`;
+    }
+
+    function saveToLocal(){
+      const rows = [...semTbody.querySelectorAll('tr')];
+      const data = rows.map(r => ({
+        sgpa: r.querySelector('.sgpa').value.trim(),
+        credits: r.querySelector('.credits').value.trim()
+      }));
+      localStorage.setItem('cgpaData', JSON.stringify(data));
+      resultDiv.textContent = 'Saved locally ✅';
+      errorDiv.textContent = '';
+    }
+
+    function loadFromLocal(){
+      const raw = localStorage.getItem('cgpaData');
+      if(!raw) return;
+      try{
+        const data = JSON.parse(raw);
+        semTbody.innerHTML = '';
+        data.forEach(d => createRow(d.sgpa, d.credits));
+        updateSemesterNumbers();
+        resultDiv.textContent = 'Loaded saved data';
+      } catch(e){ console.error(e); }
+    }
+
+    function exportCSV(){
+      const rows = [...semTbody.querySelectorAll('tr')];
+      if(rows.length === 0) {
+        errorDiv.textContent = 'No data to export.';
+        return;
+      }
+      const lines = [['Semester','SGPA','Credits']];
+      rows.forEach((r,i)=>{
+        const sgpa = r.querySelector('.sgpa').value.trim();
+        const credits = r.querySelector('.credits').value.trim();
+        lines.push([`Semester ${i+1}`, sgpa, credits]);
+      });
+      const csvContent = lines.map(r => r.map(v => `"${v}"`).join(',')).join('\n');
+      const blob = new Blob([csvContent], {type: 'text/csv;charset=utf-8;'});
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = 'cgpa_semesters.csv';
+      a.click();
+      URL.revokeObjectURL(url);
+    }
+
+    loadFromLocal();
+  </script>
+</body>
+</html>
